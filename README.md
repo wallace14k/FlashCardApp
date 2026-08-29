@@ -17,8 +17,14 @@ estudo de idiomas, e uma mecânica de ofensiva que dá motivo para voltar todo d
 - **Estatísticas**: atividade dos últimos 7 dias, previsão de revisões e composição da coleção.
 - **Monetização ao fim de cada treino**: anúncio intersticial na tela de resumo, anúncio
   recompensado que dá um protetor de ofensiva, e assinatura premium que remove os anúncios.
+- **Modo Combinar** — duas colunas, frentes de um lado e versos do outro, para ligar os pares.
+  Treino de reconhecimento, mais leve que a revisão.
+- **Importação por arquivo** — um `.json` vira um baralho inteiro. A skill `criar-baralho`
+  (em `.claude/skills/`) gera esses arquivos a partir de um tema.
+- **Sincronização com o Google Drive** — backup na pasta privada do app, com fusão registro a
+  registro em vez de sobrescrever.
 - **Tudo salvo localmente** — AsyncStorage para os dados e o diretório de documentos do app para os
-  arquivos de áudio. Nada sai do aparelho nesta versão.
+  arquivos de áudio.
 
 ## Rodando o projeto
 
@@ -146,8 +152,61 @@ eles:
 - **Sincronização entre aparelhos** — `src/storage/index.ts` é a única porta de entrada dos dados,
   então dá para trocar por SQLite ou por uma API remota sem mexer nas telas.
 
+## Importar baralhos
+
+Um arquivo `.json` vira um baralho completo. No app: aba **Baralhos** → ícone de download no topo.
+
+```json
+{
+  "linguacards": 1,
+  "deck": { "name": "Inglês — verbos frasais", "emoji": "🇺🇸", "color": "#5B8DEF" },
+  "cards": [
+    { "front": "to put off", "back": "adiar", "example": "We should put off the meeting." }
+  ]
+}
+```
+
+O formato está definido em `src/importing/format.ts` e a leitura em `src/importing/parse.ts`.
+A leitura é tolerante de propósito: erros estruturais recusam o arquivo, mas desleixo (espaços
+sobrando, cards repetidos, texto longo demais) é corrigido com aviso — não faz sentido rejeitar
+60 cards bons por causa de um.
+
+Para gerar arquivos, o repositório traz a skill **`criar-baralho`** em `.claude/skills/`. Peça o
+tema a ela ("um baralho de álgebra", "inglês para viagem") e ela devolve o `.json` pronto.
+
+## Sincronização com o Google Drive
+
+O backup vai para a `appDataFolder` — pasta oculta e privada do app, que não aparece no Drive do
+usuário. O único escopo pedido é `drive.appdata`, que **não** dá acesso aos arquivos pessoais.
+
+A fusão é registro a registro, não arquivo inteiro: em conflito vence quem foi editado por último
+(`updatedAt`), e nada é apagado. Sobrescrever o local pelo remoto faria você perder os cards
+criados no celular desde o último envio.
+
+Duas limitações desta versão, ambas deliberadas:
+
+- **Áudios não sincronizam.** São grandes demais para o espaço reservado ao app. Um card vindo de
+  outro aparelho chega sem o anexo, em vez de com um botão de play quebrado.
+- **Exclusões não propagam.** Distinguir "apagado aqui" de "criado ali" exige guardar lápides, o
+  que fica para uma versão futura. Na dúvida, o app prefere manter o card.
+
+Depende do login com Google configurado (veja abaixo) e vale por sessão — o token expira em cerca
+de uma hora e não é guardado em disco.
+
 ## Testes
 
-`npm test` cobre as três partes que definem o comportamento do produto e não dependem do React
-Native: o agendador (`src/srs`), a ofensiva (`src/streak`) e a montagem da fila de treino
-(`src/store/queue.ts`) — 37 testes no total.
+```bash
+npm test
+```
+
+São dois conjuntos, com ambientes diferentes:
+
+- **`logica`** — agendador (`src/srs`), ofensiva (`src/streak`), fila de treino
+  (`src/store/queue.ts`), leitura de importação (`src/importing`), modo Combinar (`src/matching`),
+  fusão de backup (`src/sync`) e configuração (`src/config.ts`). Roda em Node puro.
+- **`render`** — monta o app de verdade com `jest-expo`.
+
+O conjunto `render` existe por um motivo concreto: empacotar o bundle **não prova que o app sobe**.
+Uma exceção lançada durante a renderização passa pelo `expo export` e pelo `tsc`, e só aparece no
+aparelho. Foi exatamente o que aconteceu com o crash de abertura do login com Google — o teste
+`src/App.test.tsx` reprova se aquilo voltar.

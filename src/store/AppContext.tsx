@@ -8,7 +8,9 @@ import React, {
   useState,
 } from 'react';
 
-import { deleteAudio } from '../audio/storage';
+import { audioExists, deleteAudio } from '../audio/storage';
+import { toCardInput, toDeckInput, type ImportPreview } from '../importing/format';
+import type { BackupContents } from '../sync/backup';
 import { FREE_LIMITS } from '../monetization/products';
 import { FREE_ENTITLEMENTS, loadEntitlements, purchase, restore } from '../monetization/purchases';
 import { schedule } from '../srs/scheduler';
@@ -36,6 +38,11 @@ import { buildQueue, computeDeckStats, forecast, type DeckStats } from './queue'
 export interface AnswerOutcome {
   card: Card;
   log: ReviewLog;
+}
+
+export interface ImportOutcome {
+  deck: Deck;
+  cardsCreated: number;
 }
 
 export interface LimitCheck {
@@ -71,6 +78,8 @@ interface AppContextValue {
   getQueue: (deckId: string) => Card[];
   getDeckStats: (deckId: string) => DeckStats;
   answer: (cardId: string, grade: Grade, elapsedMs: number) => Promise<AnswerOutcome | null>;
+  /** Registra atividade que não mexe no agendamento (modo Combinar). */
+  registerPractice: (cards: number) => Promise<void>;
   finishSession: (result: Omit<SessionResult, 'streakBefore' | 'streakAfter' | 'goalReached'>) =>
     Promise<SessionResult>;
   getForecast: (days?: number) => number[];
@@ -86,6 +95,13 @@ interface AppContextValue {
   canAddDeck: () => LimitCheck;
   canAddCard: (deckId: string) => LimitCheck;
   canAttachBothAudios: boolean;
+
+  /** Cria um baralho e seus cards a partir de um arquivo já validado. */
+  importDeck: (preview: ImportPreview) => Promise<ImportOutcome>;
+  /** Tudo que entra no backup do Drive. */
+  snapshot: () => BackupContents;
+  /** Substitui o estado local pelo resultado de uma fusão com o backup. */
+  applyBackup: (contents: BackupContents) => Promise<void>;
 
   wipeAllData: () => Promise<void>;
 }
@@ -368,6 +384,61 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [commitCards, commitLogs]
   );
 
+  /**
+   * O modo Combinar é reconhecimento, não evocação: conta como atividade do
+   * dia (e alimenta a ofensiva), mas não reagenda card nenhum.
+   */
+  const registerPractice = useCallback(
+    async (cards: number) => {
+      const update = registerReviews(streakRef.current, cards);
+      await commitStreak(update.streak);
+    },
+    [commitStreak]
+  );
+
+  const importDeck = useCallback(
+    async (preview: ImportPreview): Promise<ImportOutcome> => {
+      const deck = createDeck(toDeckInput(preview.deck));
+      const cards = preview.cards.map((card) => createCard(toCardInput(card, deck.id)));
+
+      await commitDecks([...decksRef.current, deck]);
+      await commitCards([...cardsRef.current, ...cards]);
+
+      return { deck, cardsCreated: cards.length };
+    },
+    [commitCards, commitDecks]
+  );
+
+  const snapshot = useCallback(
+    (): BackupContents => ({
+      decks: decksRef.current,
+      cards: cardsRef.current,
+      logs: logsRef.current,
+      streak: streakRef.current,
+      settings,
+    }),
+    [settings]
+  );
+
+  const applyBackup = useCallback(
+    async (contents: BackupContents) => {
+      // Áudio não viaja no backup: um card vindo de outro aparelho aponta para
+      // um arquivo que não existe aqui, e o anexo é descartado em vez de virar
+      // um botão de play quebrado.
+      const cards = contents.cards.map((card) => ({
+        ...card,
+        frontAudio: audioExists(card.frontAudio) ? card.frontAudio : null,
+        backAudio: audioExists(card.backAudio) ? card.backAudio : null,
+      }));
+
+      await commitDecks(contents.decks);
+      await commitCards(cards);
+      await commitLogs(contents.logs);
+      await commitStreak(contents.streak);
+    },
+    [commitCards, commitDecks, commitLogs, commitStreak]
+  );
+
   const finishSession = useCallback(
     async (
       result: Omit<SessionResult, 'streakBefore' | 'streakAfter' | 'goalReached'>
@@ -473,6 +544,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       getQueue,
       getDeckStats,
       answer,
+      registerPractice,
+      importDeck,
+      snapshot,
+      applyBackup,
       finishSession,
       getForecast,
       setDailyGoal,
@@ -506,6 +581,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       getQueue,
       getDeckStats,
       answer,
+      registerPractice,
+      importDeck,
+      snapshot,
+      applyBackup,
       finishSession,
       getForecast,
       setDailyGoal,

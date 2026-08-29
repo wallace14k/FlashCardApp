@@ -6,6 +6,8 @@ export type RootStackParamList = {
   DeckDetail: { deckId: string };
   CardForm: { deckId: string; cardId?: string };
   Study: { deckId: string };
+  Matching: { deckId: string };
+  Import: undefined;
   SessionSummary: { result: SessionResult };
   Paywall: { source?: 'limite-baralhos' | 'limite-cards' | 'audio' | 'resumo' | 'perfil' };
 };
