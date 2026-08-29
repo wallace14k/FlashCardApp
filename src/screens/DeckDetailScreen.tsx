@@ -1,5 +1,5 @@
-import React, { useLayoutEffect, useMemo } from 'react';
-import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useLayoutEffect, useMemo, useState } from 'react';
+import { Alert, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -7,6 +7,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Button } from '../components/Button';
 import { EmptyState } from '../components/EmptyState';
 import { Screen } from '../components/Screen';
+import { MIN_CARDS_TO_PLAY } from '../matching/game';
 import { useApp } from '../store/AppContext';
 import { colors, radius, spacing, typography } from '../theme';
 import { formatInterval } from '../utils/date';
@@ -35,16 +36,31 @@ export function DeckDetailScreen() {
   const navigation = useNavigation<Nav>();
   const { params } = useRoute<Route>();
   const { decks, cards, getDeckStats, canAddCard, removeCard, toggleSuspend } = useApp();
+  const [search, setSearch] = useState('');
   const deck = decks.find((item) => item.id === params.deckId);
   const stats = getDeckStats(params.deckId);
 
-  const deckCards = useMemo(
+  const allDeckCards = useMemo(
     () =>
       cards
         .filter((card) => card.deckId === params.deckId)
         .sort((a, b) => b.updatedAt - a.updatedAt),
     [cards, params.deckId]
   );
+
+  // Depois de importar um arquivo com dezenas de cards, rolar a lista atrás de
+  // um deles deixa de ser viável.
+  const deckCards = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return allDeckCards;
+    return allDeckCards.filter((card) =>
+      [card.front, card.back, card.hint, card.example]
+        .filter(Boolean)
+        .some((field) => field!.toLowerCase().includes(term))
+    );
+  }, [allDeckCards, search]);
+
+  const matchingPlayable = allDeckCards.filter((card) => !card.suspended).length >= MIN_CARDS_TO_PLAY;
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -122,8 +138,38 @@ export function DeckDetailScreen() {
               fullWidth
             />
 
+            <Button
+              label="Combinar pares"
+              icon="grid-outline"
+              onPress={() => navigation.navigate('Matching', { deckId: deck.id })}
+              disabled={!matchingPlayable}
+              variant="secondary"
+              fullWidth
+            />
+
+            {allDeckCards.length > 8 ? (
+              <View style={styles.searchBox}>
+                <Ionicons name="search" size={16} color={colors.textFaint} />
+                <TextInput
+                  value={search}
+                  onChangeText={setSearch}
+                  placeholder="Buscar nos cards"
+                  placeholderTextColor={colors.textFaint}
+                  style={styles.searchInput}
+                  autoCorrect={false}
+                />
+                {search ? (
+                  <Pressable onPress={() => setSearch('')} hitSlop={8} accessibilityLabel="Limpar busca">
+                    <Ionicons name="close-circle" size={16} color={colors.textFaint} />
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : null}
+
             <Text style={styles.listTitle}>
-              {deckCards.length} {deckCards.length === 1 ? 'card' : 'cards'}
+              {search
+                ? `${deckCards.length} de ${allDeckCards.length} cards`
+                : `${allDeckCards.length} ${allDeckCards.length === 1 ? 'card' : 'cards'}`}
             </Text>
           </View>
         }
@@ -137,13 +183,23 @@ export function DeckDetailScreen() {
         )}
         ItemSeparatorComponent={() => <View style={styles.separator} />}
         ListEmptyComponent={
-          <EmptyState
-            icon="documents-outline"
-            title="Baralho vazio"
-            description="Adicione o primeiro card com a frente, o verso e, se quiser, o áudio do diálogo."
-            actionLabel="Adicionar card"
-            onAction={handleNewCard}
-          />
+          search ? (
+            <EmptyState
+              icon="search-outline"
+              title="Nenhum card encontrado"
+              description={`Nada em "${search}" neste baralho.`}
+              actionLabel="Limpar busca"
+              onAction={() => setSearch('')}
+            />
+          ) : (
+            <EmptyState
+              icon="documents-outline"
+              title="Baralho vazio"
+              description="Adicione o primeiro card com a frente, o verso e, se quiser, o áudio do diálogo."
+              actionLabel="Adicionar card"
+              onAction={handleNewCard}
+            />
+          )
         }
       />
 
@@ -244,6 +300,17 @@ const styles = StyleSheet.create({
   statValue: { fontSize: 20, fontWeight: '700' },
   statLabel: { ...typography.tiny, color: colors.textFaint, textAlign: 'center' },
   listTitle: { ...typography.caption, color: colors.textMuted },
+  searchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.md,
+  },
+  searchInput: { flex: 1, color: colors.text, fontSize: 15, paddingVertical: spacing.md },
   separator: { height: spacing.sm },
   card: {
     flexDirection: 'row',

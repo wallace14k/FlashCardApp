@@ -10,6 +10,8 @@ import { CardFormScreen } from '../screens/CardFormScreen';
 import { DeckDetailScreen } from '../screens/DeckDetailScreen';
 import { DeckFormScreen } from '../screens/DeckFormScreen';
 import { DecksScreen } from '../screens/DecksScreen';
+import { ImportScreen } from '../screens/ImportScreen';
+import { MatchingScreen } from '../screens/MatchingScreen';
 import { LoginScreen } from '../screens/LoginScreen';
 import { PaywallScreen } from '../screens/PaywallScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
@@ -109,6 +111,16 @@ export function RootNavigator() {
             name="Study"
             component={StudyScreen}
             options={{ title: 'Treino', gestureEnabled: false }}
+          />
+          <Stack.Screen
+            name="Matching"
+            component={MatchingScreen}
+            options={{ title: 'Combinar' }}
+          />
+          <Stack.Screen
+            name="Import"
+            component={ImportScreen}
+            options={{ title: 'Importar', presentation: 'modal' }}
           />
           <Stack.Screen
             name="SessionSummary"

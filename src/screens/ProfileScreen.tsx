@@ -8,6 +8,7 @@ import { Screen } from '../components/Screen';
 import { audioDiskUsage, formatBytes, pruneOrphanAudio } from '../audio/storage';
 import { useAuth } from '../auth/AuthContext';
 import { cancelDailyReminder, scheduleDailyReminder } from '../notifications/reminders';
+import { useDriveSync } from '../sync/useDriveSync';
 import { useApp } from '../store/AppContext';
 import { colors, radius, spacing, typography } from '../theme';
 import type { RootStackParamList } from '../navigation/types';
@@ -26,6 +27,7 @@ export function ProfileScreen() {
 
   const [diskUsage, setDiskUsage] = useState(() => audioDiskUsage());
   const [reminderBusy, setReminderBusy] = useState(false);
+  const drive = useDriveSync();
 
   const audioCount = useMemo(
     () => cards.filter((card) => card.frontAudio || card.backAudio).length,
@@ -148,6 +150,57 @@ export function ProfileScreen() {
             <Ionicons name="chevron-forward" size={18} color={colors.premium} />
           </Pressable>
         ) : null}
+
+        <Section title="Google Drive">
+          <Text style={styles.sectionHint}>
+            Envia baralhos, cards e progresso para uma pasta privada do app no seu Drive — invisível
+            no seu Drive pessoal e sem acesso aos seus outros arquivos. Os áudios não vão junto:
+            são grandes demais e ficam só no aparelho.
+          </Text>
+
+          {drive.available ? (
+            <Pressable
+              onPress={() => void drive.sync()}
+              disabled={drive.status === 'sincronizando'}
+              style={styles.rowAction}
+            >
+              <Ionicons
+                name={drive.status === 'sincronizando' ? 'sync' : 'cloud-upload-outline'}
+                size={18}
+                color={colors.text}
+              />
+              <Text style={styles.rowActionLabel}>
+                {drive.status === 'sincronizando' ? 'Sincronizando…' : 'Sincronizar agora'}
+              </Text>
+            </Pressable>
+          ) : (
+            <View style={styles.driveLocked}>
+              <Ionicons name="lock-closed-outline" size={16} color={colors.textFaint} />
+              <Text style={styles.driveLockedText}>
+                {user?.provider === 'google'
+                  ? 'Entre com o Google novamente — o acesso ao Drive vale por sessão.'
+                  : 'Disponível para quem entra com a conta Google.'}
+              </Text>
+            </View>
+          )}
+
+          {drive.message ? (
+            <Text
+              style={[
+                styles.driveMessage,
+                drive.status === 'erro' ? styles.driveError : styles.driveOk,
+              ]}
+            >
+              {drive.message}
+            </Text>
+          ) : null}
+
+          {drive.lastSyncAt ? (
+            <Text style={styles.sectionHint}>
+              Última sincronização às {new Date(drive.lastSyncAt).toLocaleTimeString('pt-BR')}.
+            </Text>
+          ) : null}
+        </Section>
 
         <Section title="Meta diária">
           <Text style={styles.sectionHint}>
@@ -383,6 +436,12 @@ const styles = StyleSheet.create({
   toggleBody: { flex: 1, gap: 2 },
   toggleLabel: { ...typography.body },
   toggleDescription: { ...typography.tiny, color: colors.textFaint, lineHeight: 16 },
+
+  driveLocked: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  driveLockedText: { ...typography.tiny, color: colors.textFaint, flex: 1, lineHeight: 16 },
+  driveMessage: { ...typography.caption, lineHeight: 18 },
+  driveOk: { color: colors.known },
+  driveError: { color: colors.forgot },
 
   rowAction: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm },
   rowActionLabel: { ...typography.body },

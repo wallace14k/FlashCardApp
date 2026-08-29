@@ -61,12 +61,22 @@ export function DecksScreen() {
                     : 'Nada vencido agora — volte mais tarde'}
                 </Text>
               </View>
-              <StreakBadge
-                days={streak.current}
-                activeToday={goalDone}
-                freezes={streak.freezes}
-                onPress={() => navigation.navigate('Main')}
-              />
+              <View style={styles.headerActions}>
+                <Pressable
+                  onPress={() => navigation.navigate('Import')}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Importar baralho de um arquivo"
+                  style={({ pressed }) => [styles.importButton, pressed && styles.importPressed]}
+                >
+                  <Ionicons name="download-outline" size={18} color={colors.textMuted} />
+                </Pressable>
+                <StreakBadge
+                  days={streak.current}
+                  activeToday={goalDone}
+                  freezes={streak.freezes}
+                />
+              </View>
             </View>
 
             <View style={styles.goalCard}>
@@ -103,7 +113,7 @@ export function DecksScreen() {
           <EmptyState
             icon="albums-outline"
             title="Nenhum baralho ainda"
-            description="Crie um baralho por tema ou idioma e comece a montar seus cards."
+            description="Crie um baralho por tema ou idioma, ou importe um arquivo pronto."
             actionLabel="Criar baralho"
             onAction={handleNewDeck}
           />
@@ -128,6 +138,16 @@ const styles = StyleSheet.create({
   topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: spacing.md },
   greeting: { ...typography.h1 },
   subtitle: { ...typography.caption, color: colors.textMuted, marginTop: 2 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  importButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  importPressed: { opacity: 0.7 },
   goalCard: {
     backgroundColor: colors.bgElevated,
     borderRadius: radius.lg,

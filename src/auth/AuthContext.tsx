@@ -6,6 +6,7 @@ import * as WebBrowser from 'expo-web-browser';
 
 import { googleClientIds, isGoogleConfigured } from '../config';
 import { storage } from '../storage';
+import { DRIVE_SCOPE } from '../sync/drive';
 import { createId } from '../utils/id';
 import type { AuthUser } from '../types';
 
@@ -25,6 +26,12 @@ interface AuthContextValue {
   signInWithApple: () => Promise<void>;
   continueAsGuest: () => Promise<void>;
   signOut: () => Promise<void>;
+  /**
+   * Token de acesso do Google, usado para falar com o Drive. `null` quando o
+   * usuário não entrou com Google ou quando o token já venceu — a sincronização
+   * pede um novo login nesse caso.
+   */
+  googleAccessToken: string | null;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -38,9 +45,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Os client IDs vêm de `googleClientIds()` porque `useAuthRequest` lança
   // quando não encontra nenhum — e daqui, na raiz da árvore, a exceção levaria
   // o app junto na abertura.
+  // O token vive só na memória: guardá-lo em disco alongaria a janela em que
+  // uma credencial válida fica exposta, e ele vence em cerca de uma hora de
+  // qualquer forma. Ao reabrir o app, a sincronização pede login de novo.
+  const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
+
+  // Os client IDs vêm de `googleClientIds()` porque `useAuthRequest` lança
+  // quando não encontra nenhum — e daqui, na raiz da árvore, a exceção levaria
+  // o app junto na abertura.
   const [, googleResponse, promptGoogle] = Google.useAuthRequest({
     ...googleClientIds(),
-    scopes: ['profile', 'email'],
+    // `drive.appdata` dá acesso apenas à pasta privada do app no Drive, nunca
+    // aos arquivos pessoais do usuário.
+    scopes: ['profile', 'email', DRIVE_SCOPE],
   });
 
   // Restaura a sessão salva no aparelho.
@@ -76,7 +93,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const accessToken = googleResponse.authentication?.accessToken;
+    const accessToken = googleResponse.authentication?.accessToken ?? null;
+    setGoogleAccessToken(accessToken);
     void (async () => {
       try {
         const profile = accessToken ? await fetchGoogleProfile(accessToken) : null;
@@ -160,6 +178,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Os baralhos e cards continuam no aparelho: sair é só encerrar a sessão.
     await storage.saveUser(null);
     setUser(null);
+    setGoogleAccessToken(null);
   }, []);
 
   const value = useMemo<AuthContextValue>(
@@ -173,6 +192,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       signInWithApple,
       continueAsGuest,
       signOut,
+      googleAccessToken,
     }),
     [
       user,
@@ -183,6 +203,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       signInWithApple,
       continueAsGuest,
       signOut,
+      googleAccessToken,
     ]
   );
 
