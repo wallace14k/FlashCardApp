@@ -4,7 +4,7 @@ import * as AppleAuthentication from 'expo-apple-authentication';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 
-import { config, isGoogleConfigured } from '../config';
+import { googleClientIds, isGoogleConfigured } from '../config';
 import { storage } from '../storage';
 import { createId } from '../utils/id';
 import type { AuthUser } from '../types';
@@ -35,11 +35,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [pending, setPending] = useState<AuthContextValue['pending']>(null);
   const [appleAvailable, setAppleAvailable] = useState(false);
 
+  // Os client IDs vêm de `googleClientIds()` porque `useAuthRequest` lança
+  // quando não encontra nenhum — e daqui, na raiz da árvore, a exceção levaria
+  // o app junto na abertura.
   const [, googleResponse, promptGoogle] = Google.useAuthRequest({
-    iosClientId: config.google.iosClientId || undefined,
-    androidClientId: config.google.androidClientId || undefined,
-    webClientId: config.google.webClientId || undefined,
-    clientId: config.google.expoClientId || config.google.webClientId || undefined,
+    ...googleClientIds(),
     scopes: ['profile', 'email'],
   });
 
