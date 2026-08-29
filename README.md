@@ -24,15 +24,69 @@ estudo de idiomas, e uma mecânica de ofensiva que dá motivo para voltar todo d
 
 ```bash
 npm install
-npm start          # abre o Metro; leia o QR code com o Expo Go
-npm run android    # ou npm run ios
 npm test           # testes da lógica de agendamento, ofensiva e fila
 npm run typecheck
 ```
 
-Gravação de áudio e login com conta Apple precisam de um *development build*
-(`npx expo run:ios` / `npx expo run:android` ou EAS Build) — no Expo Go essas APIs nativas têm
-suporte limitado.
+### Expo Go
+
+```bash
+npm start          # abre o Metro; leia o QR code com o Expo Go
+```
+
+Só funciona se a versão do Expo Go instalada no aparelho corresponder ao SDK do projeto
+(atualmente **SDK 57**). O app do Expo Go nas lojas costuma ficar um SDK atrás por algumas
+semanas depois de um lançamento, e nesse período ele recusa o projeto com
+*"Project is incompatible with this version of Expo Go"*. Quando isso acontecer, use o
+build do EAS abaixo — não adianta esperar a loja.
+
+### EAS Build (recomendado)
+
+Compila na nuvem, não exige Android Studio nem Xcode e funciona a partir de qualquer sistema,
+Windows incluído. Precisa de uma conta Expo (gratuita).
+
+```bash
+npm install -g eas-cli
+eas login
+eas build --platform android --profile preview
+```
+
+O primeiro build vincula o projeto à sua conta e grava o `projectId` em `app.json`. Ao terminar,
+o EAS devolve um link com o APK — abra no celular Android e instale.
+
+Três perfis estão configurados em `eas.json`:
+
+| Perfil | Para quê |
+| --- | --- |
+| `preview` | APK autônomo para instalar e testar. É o que você quer para experimentar o app. |
+| `development` | Build com `expo-dev-client`: substitui o Expo Go, conecta no Metro e recarrega o código na hora. Melhor para desenvolver. |
+| `production` | App bundle assinado, para publicar na Play Store. |
+
+Para o `development`, instale o build uma vez e depois rode `npm start` normalmente — ele conecta
+igual ao Expo Go, mas com os módulos nativos deste projeto.
+
+### iOS
+
+Instalar em um iPhone físico exige o **Apple Developer Program** (US$ 99/ano), porque a Apple
+exige um perfil de provisionamento. Não é limitação do Expo. Com a conta:
+
+```bash
+eas build --platform ios --profile preview
+```
+
+Sem conta paga, as alternativas para iOS são o Expo Go (quando o SDK bater) ou o simulador do
+Xcode, que precisa de um Mac (`eas build --platform ios --profile development` gera um build de
+simulador).
+
+### Build nativo local
+
+```bash
+npx expo run:android   # exige Android Studio e ANDROID_HOME configurado
+npx expo run:ios       # exige macOS com Xcode
+```
+
+Gera as pastas `android/` e `ios/` (ambas no `.gitignore`). Só vale a pena se você for mexer em
+código nativo — para testar, o EAS é mais simples.
 
 ## Como o agendamento funciona
 
