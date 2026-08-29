@@ -27,8 +27,7 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "permissions": ["android.permission.RECORD_AUDIO"],
-      "predictiveBackGestureEnabled": false,
-      "edgeToEdgeEnabled": true
+      "predictiveBackGestureEnabled": false
     },
     "web": {
       "favicon": "./assets/favicon.png"
