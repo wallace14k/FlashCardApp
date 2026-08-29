@@ -26,7 +26,16 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "permissions": ["android.permission.RECORD_AUDIO"],
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ],
       "predictiveBackGestureEnabled": false
     },
     "web": {
@@ -48,7 +57,16 @@
       "googleAndroidClientId": "",
       "googleWebClientId": "",
       "admobInterstitialIosId": "",
-      "admobInterstitialAndroidId": ""
+      "admobInterstitialAndroidId": "",
+      "eas": {
+        "projectId": "88e62beb-6fee-4348-87da-c0a05bd1e481"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/88e62beb-6fee-4348-87da-c0a05bd1e481"
     }
   }
 }
