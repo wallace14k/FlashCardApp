@@ -31,9 +31,10 @@ import type {
   SessionResult,
   Settings,
   StreakState,
+  StudyDirection,
 } from '../types';
 import { DEFAULT_SETTINGS, createCard, createDeck, createStarterContent } from './defaults';
-import { buildQueue, computeDeckStats, forecast, type DeckStats } from './queue';
+import { buildQueue, computeDeckStats, forecast, srsFor, type DeckStats, type QueueItem } from './queue';
 
 export interface AnswerOutcome {
   card: Card;
@@ -75,9 +76,14 @@ interface AppContextValue {
   resetCardProgress: (cardId: string) => Promise<void>;
 
   // Treino
-  getQueue: (deckId: string) => Card[];
+  getQueue: (deckId: string) => QueueItem[];
   getDeckStats: (deckId: string) => DeckStats;
-  answer: (cardId: string, grade: Grade, elapsedMs: number) => Promise<AnswerOutcome | null>;
+  answer: (
+    cardId: string,
+    direction: StudyDirection,
+    grade: Grade,
+    elapsedMs: number
+  ) => Promise<AnswerOutcome | null>;
   /** Registra atividade que não mexe no agendamento (modo Combinar). */
   registerPractice: (cards: number) => Promise<void>;
   finishSession: (result: Omit<SessionResult, 'streakBefore' | 'streakAfter' | 'goalReached'>) =>
@@ -322,14 +328,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     async (cardId: string) => {
       const { createSrsState } = await import('../srs/scheduler');
       const next = cardsRef.current.map((card) =>
-        card.id === cardId ? { ...card, srs: createSrsState(), updatedAt: Date.now() } : card
+        card.id === cardId
+          ? { ...card, srs: createSrsState(), reverseSrs: null, updatedAt: Date.now() }
+          : card
       );
       await commitCards(next);
     },
     [commitCards]
   );
 
-  const getQueue = useCallback((deckId: string): Card[] => {
+  const getQueue = useCallback((deckId: string): QueueItem[] => {
     const deck = decksRef.current.find((item) => item.id === deckId);
     if (!deck) return [];
     return buildQueue(deck, cardsRef.current, logsRef.current);
@@ -357,20 +365,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   );
 
   const answer = useCallback(
-    async (cardId: string, grade: Grade, elapsedMs: number): Promise<AnswerOutcome | null> => {
+    async (
+      cardId: string,
+      direction: StudyDirection,
+      grade: Grade,
+      elapsedMs: number
+    ): Promise<AnswerOutcome | null> => {
       const card = cardsRef.current.find((item) => item.id === cardId);
       if (!card) return null;
 
       const now = Date.now();
-      const nextSrs = schedule(card.srs, grade, { now });
-      const updated: Card = { ...card, srs: nextSrs, updatedAt: now };
+      const previous = srsFor(card, direction);
+      const nextSrs = schedule(previous, grade, { now });
+      // Cada sentido guarda o seu agendamento; responder um não mexe no outro.
+      const updated: Card =
+        direction === 'forward'
+          ? { ...card, srs: nextSrs, updatedAt: now }
+          : { ...card, reverseSrs: nextSrs, updatedAt: now };
 
       const log: ReviewLog = {
         id: createId('r'),
         cardId: card.id,
         deckId: card.deckId,
+        direction,
         grade,
-        previousState: card.srs.state,
+        previousState: previous.state,
         intervalDays: nextSrs.intervalDays,
         elapsedMs,
         reviewedAt: now,

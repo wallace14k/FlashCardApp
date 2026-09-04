@@ -109,6 +109,7 @@ describe('mergeBackup', () => {
       id: 'r1',
       cardId: 'c1',
       deckId: 'd1',
+      direction: 'forward' as const,
       grade: 'known' as const,
       previousState: 'review' as const,
       intervalDays: 1,

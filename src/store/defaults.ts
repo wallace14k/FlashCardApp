@@ -10,6 +10,7 @@ export const DEFAULT_SETTINGS: Settings = {
   reminderEnabled: false,
   reminderTime: '20:00',
   showNextInterval: true,
+  typingEnabled: false,
 };
 
 export const DEFAULT_NEW_PER_DAY = 15;
@@ -25,6 +26,7 @@ export function createDeck(input: Partial<Deck> & { name: string }): Deck {
     color: input.color ?? deckColors[0],
     newPerDay: input.newPerDay ?? DEFAULT_NEW_PER_DAY,
     reviewsPerDay: input.reviewsPerDay ?? DEFAULT_REVIEWS_PER_DAY,
+    directions: input.directions ?? ['forward'],
     createdAt: now,
     updatedAt: now,
   };
@@ -44,6 +46,7 @@ export function createCard(input: Partial<Card> & { deckId: string; front: strin
     tags: input.tags ?? [],
     suspended: false,
     srs: createSrsState(now),
+    reverseSrs: null,
     createdAt: now,
     updatedAt: now,
   };

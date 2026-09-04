@@ -9,6 +9,18 @@
 /** Como o usuário avaliou o card. É o que alimenta o agendamento. */
 export type Grade = 'forgot' | 'partial' | 'known';
 
+/**
+ * Sentido em que o card é estudado.
+ *
+ * - `forward`: vê a frente, lembra o verso (reconhecer "put off" → "adiar").
+ * - `reverse`: vê o verso, lembra a frente (produzir "adiar" → "put off").
+ *
+ * Produzir é bem mais difícil que reconhecer, então cada sentido tem seu
+ * próprio agendamento. Compartilhar um só faria o intervalo refletir uma média
+ * de duas habilidades diferentes, e nenhum dos dois voltaria na hora certa.
+ */
+export type StudyDirection = 'forward' | 'reverse';
+
 /** Estágio do card dentro do fluxo de repetição espaçada. */
 export type CardState = 'new' | 'learning' | 'review' | 'relearning';
 
@@ -57,7 +69,13 @@ export interface Card {
   backAudio?: CardAudio | null;
   tags: string[];
   suspended: boolean;
+  /** Agendamento do sentido frente → verso. */
   srs: SrsState;
+  /**
+   * Agendamento do sentido verso → frente. Só existe depois que o baralho
+   * passa a estudar nesse sentido; cards antigos ganham o seu na hora.
+   */
+  reverseSrs?: SrsState | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -72,6 +90,11 @@ export interface Deck {
   newPerDay: number;
   /** Limite de revisões por dia (0 = sem limite). */
   reviewsPerDay: number;
+  /**
+   * Sentidos em que este baralho é estudado. Com os dois, cada card vira duas
+   * entradas na fila, cada uma com seu próprio agendamento.
+   */
+  directions: StudyDirection[];
   createdAt: number;
   updatedAt: number;
 }
@@ -81,6 +104,8 @@ export interface ReviewLog {
   id: string;
   cardId: string;
   deckId: string;
+  /** Sentido em que o card foi respondido. */
+  direction: StudyDirection;
   grade: Grade;
   /** Estado do card antes da resposta. */
   previousState: CardState;
@@ -138,6 +163,11 @@ export interface Settings {
   reminderTime: string;
   /** Mostra o intervalo previsto em cada botão de resposta. */
   showNextInterval: boolean;
+  /**
+   * Pede a resposta digitada antes de revelar o card. Evocar escrevendo fixa
+   * mais do que só virar a carta, ao custo de um treino mais lento.
+   */
+  typingEnabled: boolean;
 }
 
 /** Resultado consolidado de um treino, usado na tela de resumo. */

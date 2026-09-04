@@ -12,6 +12,11 @@ interface Props {
   /** Exibe o intervalo previsto abaixo de cada rótulo. */
   showIntervals: boolean;
   disabled?: boolean;
+  /**
+   * Resposta sugerida pelo modo digitação. É só um destaque visual — quem
+   * decide continua sendo o usuário, que é o único a saber se hesitou.
+   */
+  suggested?: Grade | null;
 }
 
 const OPTIONS: { grade: Grade; label: string; color: string; background: string }[] = [
@@ -24,7 +29,7 @@ const OPTIONS: { grade: Grade; label: string; color: string; background: string 
  * As três respostas do treino. É a única entrada do agendador: a escolha
  * define quando o card reaparece.
  */
-export function GradeButtons({ intervals, onGrade, showIntervals, disabled }: Props) {
+export function GradeButtons({ intervals, onGrade, showIntervals, disabled, suggested }: Props) {
   return (
     <View style={styles.row}>
       {OPTIONS.map((option) => (
@@ -37,6 +42,7 @@ export function GradeButtons({ intervals, onGrade, showIntervals, disabled }: Pr
           style={({ pressed }) => [
             styles.button,
             { backgroundColor: option.background, borderColor: `${option.color}55` },
+            suggested === option.grade && { borderColor: option.color, borderWidth: 2 },
             pressed && styles.pressed,
             disabled && styles.disabled,
           ]}

@@ -1,5 +1,31 @@
+import { createSrsState } from '../srs/scheduler';
 import { dayKey } from '../utils/date';
-import type { Card, Deck, ReviewLog } from '../types';
+import type { Card, Deck, ReviewLog, SrsState, StudyDirection } from '../types';
+
+/**
+ * Uma entrada da fila: um card em um sentido específico. Com o baralho
+ * estudando nos dois sentidos, o mesmo card aparece duas vezes, cada uma com
+ * seu próprio agendamento.
+ */
+export interface QueueItem {
+  card: Card;
+  direction: StudyDirection;
+}
+
+/** Agendamento do card no sentido pedido. */
+export function srsFor(card: Card, direction: StudyDirection): SrsState {
+  if (direction === 'forward') return card.srs;
+  // Um baralho que acabou de ligar o sentido invertido tem cards sem esse
+  // agendamento; eles entram como novos, que é o que de fato são nesse sentido.
+  return card.reverseSrs ?? createSrsState(card.createdAt);
+}
+
+/** O que é mostrado primeiro e o que é a resposta, conforme o sentido. */
+export function facesFor(card: Card, direction: StudyDirection) {
+  return direction === 'forward'
+    ? { prompt: card.front, answer: card.back, promptAudio: card.frontAudio, answerAudio: card.backAudio }
+    : { prompt: card.back, answer: card.front, promptAudio: card.backAudio, answerAudio: card.frontAudio };
+}
 
 /** Números exibidos no cartão do baralho e no cabeçalho do treino. */
 export interface DeckStats {
@@ -17,8 +43,14 @@ export interface DeckStats {
   suspended: number;
 }
 
-function isLearningState(card: Card): boolean {
-  return card.srs.state === 'learning' || card.srs.state === 'relearning';
+function isLearningState(srs: SrsState): boolean {
+  return srs.state === 'learning' || srs.state === 'relearning';
+}
+
+/** Todas as combinações de card e sentido que o baralho estuda. */
+function expand(deck: Deck, cards: Card[]): QueueItem[] {
+  const directions = deck.directions?.length ? deck.directions : (['forward'] as StudyDirection[]);
+  return cards.flatMap((card) => directions.map((direction) => ({ card, direction })));
 }
 
 /** Quantos cards novos e quantas revisões já foram feitos hoje neste baralho. */
@@ -45,9 +77,18 @@ export function computeDeckStats(
   const active = deckCards.filter((card) => !card.suspended);
   const { newIntroduced, reviews } = todayCounts(logs, deck.id, now);
 
-  const newCards = active.filter((card) => card.srs.state === 'new');
-  const learningDue = active.filter((card) => isLearningState(card) && card.srs.due <= now);
-  const reviewDue = active.filter((card) => card.srs.state === 'review' && card.srs.due <= now);
+  // As contagens são por entrada da fila, não por card: nos dois sentidos, um
+  // card com frente e verso vencidos é duas coisas a fazer, não uma.
+  const items = expand(deck, active);
+  const newCards = items.filter((item) => srsFor(item.card, item.direction).state === 'new');
+  const learningDue = items.filter((item) => {
+    const srs = srsFor(item.card, item.direction);
+    return isLearningState(srs) && srs.due <= now;
+  });
+  const reviewDue = items.filter((item) => {
+    const srs = srsFor(item.card, item.direction);
+    return srs.state === 'review' && srs.due <= now;
+  });
 
   const newQuota = Math.max(0, deck.newPerDay - newIntroduced);
   const reviewQuota =
@@ -63,7 +104,10 @@ export function computeDeckStats(
     learningDue: learningDue.length,
     reviewDue: reviewAllowed,
     readyNow: newAvailable + learningDue.length + reviewAllowed,
-    scheduled: active.filter((card) => card.srs.due > now && card.srs.state !== 'new').length,
+    scheduled: items.filter((item) => {
+      const srs = srsFor(item.card, item.direction);
+      return srs.due > now && srs.state !== 'new';
+    }).length,
     suspended: deckCards.length - active.length,
   };
 }
@@ -81,26 +125,36 @@ export function buildQueue(
   cards: Card[],
   logs: ReviewLog[],
   now = Date.now()
-): Card[] {
+): QueueItem[] {
   const active = cards.filter((card) => card.deckId === deck.id && !card.suspended);
+  const items = expand(deck, active);
   const { newIntroduced, reviews } = todayCounts(logs, deck.id, now);
 
   const newQuota = Math.max(0, deck.newPerDay - newIntroduced);
   const reviewQuota =
     deck.reviewsPerDay > 0 ? Math.max(0, deck.reviewsPerDay - reviews) : Number.MAX_SAFE_INTEGER;
 
-  const learning = active
-    .filter((card) => isLearningState(card) && card.srs.due <= now)
-    .sort((a, b) => a.srs.due - b.srs.due);
+  const byDue = (a: QueueItem, b: QueueItem) =>
+    srsFor(a.card, a.direction).due - srsFor(b.card, b.direction).due;
 
-  const review = active
-    .filter((card) => card.srs.state === 'review' && card.srs.due <= now)
-    .sort((a, b) => a.srs.due - b.srs.due)
+  const learning = items
+    .filter((item) => {
+      const srs = srsFor(item.card, item.direction);
+      return isLearningState(srs) && srs.due <= now;
+    })
+    .sort(byDue);
+
+  const review = items
+    .filter((item) => {
+      const srs = srsFor(item.card, item.direction);
+      return srs.state === 'review' && srs.due <= now;
+    })
+    .sort(byDue)
     .slice(0, reviewQuota);
 
-  const fresh = active
-    .filter((card) => card.srs.state === 'new')
-    .sort((a, b) => a.createdAt - b.createdAt)
+  const fresh = items
+    .filter((item) => srsFor(item.card, item.direction).state === 'new')
+    .sort((a, b) => a.card.createdAt - b.card.createdAt)
     .slice(0, newQuota);
 
   return [...learning, ...interleave(review, fresh)];
@@ -110,11 +164,11 @@ export function buildQueue(
  * Distribui os cards novos uniformemente entre as revisões.
  * Sem revisões, devolve apenas os novos.
  */
-function interleave(review: Card[], fresh: Card[]): Card[] {
+function interleave(review: QueueItem[], fresh: QueueItem[]): QueueItem[] {
   if (fresh.length === 0) return review;
   if (review.length === 0) return fresh;
 
-  const result: Card[] = [];
+  const result: QueueItem[] = [];
   const gap = review.length / fresh.length;
   let nextNewAt = gap;
   let freshIndex = 0;
@@ -144,10 +198,15 @@ export function forecast(cards: Card[], days = 7, now = Date.now()): number[] {
 
   const buckets = new Array<number>(days).fill(0);
   for (const card of cards) {
-    if (card.suspended || card.srs.state === 'new') continue;
-    const index = Math.floor((card.srs.due - base) / DAY);
-    if (index < 0) buckets[0] += 1;
-    else if (index < days) buckets[index] += 1;
+    if (card.suspended) continue;
+    // Conta os dois agendamentos: no sentido invertido o card volta em outro
+    // dia, e omitir isso subestimaria a carga futura.
+    for (const srs of [card.srs, card.reverseSrs]) {
+      if (!srs || srs.state === 'new') continue;
+      const index = Math.floor((srs.due - base) / DAY);
+      if (index < 0) buckets[0] += 1;
+      else if (index < days) buckets[index] += 1;
+    }
   }
   return buckets;
 }

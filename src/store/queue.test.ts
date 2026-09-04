@@ -1,8 +1,8 @@
-import { buildQueue, computeDeckStats, forecast, todayCounts } from './queue';
+import { buildQueue, computeDeckStats, facesFor, forecast, srsFor, todayCounts } from './queue';
 import { createCard, createDeck } from './defaults';
 import { createSrsState } from '../srs/scheduler';
 import { createId } from '../utils/id';
-import type { Card, CardState, Deck, ReviewLog } from '../types';
+import type { Card, CardState, Deck, ReviewLog, StudyDirection } from '../types';
 
 const MINUTE_MS = 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -31,6 +31,7 @@ function makeLog(deck: Deck, previousState: CardState, reviewedAt: number): Revi
     id: createId('r'),
     cardId: createId('c'),
     deckId: deck.id,
+    direction: 'forward' as StudyDirection,
     grade: 'known',
     previousState,
     intervalDays: 1,
@@ -49,7 +50,7 @@ describe('buildQueue', () => {
     const queue = buildQueue(deck, cards, [], NOW);
 
     expect(queue).toHaveLength(1);
-    expect(queue[0].id).toBe(cards[0].id);
+    expect(queue[0].card.id).toBe(cards[0].id);
   });
 
   it('coloca os cards em aprendizado na frente da fila', () => {
@@ -58,7 +59,7 @@ describe('buildQueue', () => {
     const learning = makeCard(deck, 'learning', -MINUTE_MS);
     const queue = buildQueue(deck, [review, learning], [], NOW);
 
-    expect(queue[0].id).toBe(learning.id);
+    expect(queue[0].card.id).toBe(learning.id);
   });
 
   it('respeita o limite diário de cards novos', () => {
@@ -116,7 +117,7 @@ describe('buildQueue', () => {
     const queue = buildQueue(deck, [...reviews, ...fresh], [], NOW);
     const newIds = new Set(fresh.map((card) => card.id));
     const positions = queue
-      .map((card, index) => (newIds.has(card.id) ? index : -1))
+      .map((item, index) => (newIds.has(item.card.id) ? index : -1))
       .filter((index) => index >= 0);
 
     expect(queue).toHaveLength(6);
@@ -189,5 +190,110 @@ describe('forecast', () => {
     expect(buckets[0]).toBe(1);
     expect(buckets[1]).toBe(2);
     expect(buckets.reduce((sum, value) => sum + value, 0)).toBe(3);
+  });
+});
+
+describe('estudo nos dois sentidos', () => {
+  it('gera uma entrada por sentido para cada card', () => {
+    const deck = makeDeck({ directions: ['forward', 'reverse'], newPerDay: 10 });
+    const cards = [makeCard(deck, 'new', 0), makeCard(deck, 'new', 0)];
+    const queue = buildQueue(deck, cards, [], NOW);
+
+    expect(queue).toHaveLength(4);
+    expect(queue.filter((item) => item.direction === 'forward')).toHaveLength(2);
+    expect(queue.filter((item) => item.direction === 'reverse')).toHaveLength(2);
+  });
+
+  it('só gera o sentido invertido quando o baralho pede', () => {
+    const deck = makeDeck({ directions: ['reverse'], newPerDay: 10 });
+    const queue = buildQueue(deck, [makeCard(deck, 'new', 0)], [], NOW);
+
+    expect(queue).toHaveLength(1);
+    expect(queue[0].direction).toBe('reverse');
+  });
+
+  it('trata o sentido invertido como novo enquanto ele não tem agendamento', () => {
+    const deck = makeDeck({ directions: ['forward', 'reverse'] });
+    // Card já maduro no sentido normal, mas nunca estudado no invertido.
+    const card = makeCard(deck, 'review', DAY_MS);
+    expect(srsFor(card, 'forward').state).toBe('review');
+    expect(srsFor(card, 'reverse').state).toBe('new');
+  });
+
+  it('mantém agendamentos separados por sentido', () => {
+    const deck = makeDeck({ directions: ['forward', 'reverse'] });
+    const card = {
+      ...makeCard(deck, 'review', DAY_MS),
+      reverseSrs: { ...createSrsState(NOW), state: 'review' as const, due: NOW - DAY_MS },
+    };
+    const queue = buildQueue(deck, [card], [], NOW);
+
+    // Só o invertido está vencido; o normal vence só amanhã.
+    expect(queue).toHaveLength(1);
+    expect(queue[0].direction).toBe('reverse');
+  });
+
+  it('conta as duas entradas nas estatísticas do baralho', () => {
+    const deck = makeDeck({ directions: ['forward', 'reverse'], newPerDay: 10 });
+    const stats = computeDeckStats(deck, [makeCard(deck, 'new', 0)], [], NOW);
+
+    // Um card, mas duas coisas a fazer.
+    expect(stats.total).toBe(1);
+    expect(stats.newAvailable).toBe(2);
+    expect(stats.readyNow).toBe(2);
+  });
+
+  it('a cota diária de novos vale para entradas, não para cards', () => {
+    const deck = makeDeck({ directions: ['forward', 'reverse'], newPerDay: 3 });
+    const cards = [makeCard(deck, 'new', 0), makeCard(deck, 'new', 0)];
+    expect(buildQueue(deck, cards, [], NOW)).toHaveLength(3);
+  });
+
+  it('conta os dois agendamentos na previsão de revisões', () => {
+    const deck = makeDeck({ directions: ['forward', 'reverse'] });
+    const card = {
+      ...makeCard(deck, 'review', DAY_MS),
+      reverseSrs: { ...createSrsState(NOW), state: 'review' as const, due: NOW + DAY_MS },
+    };
+    const buckets = forecast([card], 7, NOW);
+
+    expect(buckets[1]).toBe(2);
+  });
+
+  it('baralho sem o campo de sentidos é tratado como só frente → verso', () => {
+    const deck = { ...makeDeck(), directions: undefined as unknown as Deck['directions'] };
+    const queue = buildQueue(deck, [makeCard(deck, 'new', 0)], [], NOW);
+
+    expect(queue).toHaveLength(1);
+    expect(queue[0].direction).toBe('forward');
+  });
+});
+
+describe('facesFor', () => {
+  it('mostra a frente e responde o verso no sentido normal', () => {
+    const deck = makeDeck();
+    const card = { ...makeCard(deck, 'new', 0), front: 'hello', back: 'olá' };
+    const faces = facesFor(card, 'forward');
+
+    expect(faces.prompt).toBe('hello');
+    expect(faces.answer).toBe('olá');
+  });
+
+  it('inverte as faces no sentido invertido', () => {
+    const deck = makeDeck();
+    const card = { ...makeCard(deck, 'new', 0), front: 'hello', back: 'olá' };
+    const faces = facesFor(card, 'reverse');
+
+    expect(faces.prompt).toBe('olá');
+    expect(faces.answer).toBe('hello');
+  });
+
+  it('acompanha o áudio junto da face correspondente', () => {
+    const deck = makeDeck();
+    const audio = { uri: 'file://a.m4a', durationMs: 100, source: 'recording' as const };
+    const card = { ...makeCard(deck, 'new', 0), frontAudio: audio, backAudio: null };
+
+    expect(facesFor(card, 'forward').promptAudio).toBe(audio);
+    expect(facesFor(card, 'reverse').answerAudio).toBe(audio);
   });
 });

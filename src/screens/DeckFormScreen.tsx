@@ -9,6 +9,30 @@ import { TextField } from '../components/TextField';
 import { useApp } from '../store/AppContext';
 import { colors, deckColors, deckEmojis, radius, spacing, typography } from '../theme';
 import type { RootStackParamList } from '../navigation/types';
+import type { StudyDirection } from '../types';
+
+/** Combinações de sentido oferecidas na criação do baralho. */
+const DIRECTION_OPTIONS: {
+  value: StudyDirection[];
+  label: string;
+  description: string;
+}[] = [
+  {
+    value: ['forward'],
+    label: 'Só frente → verso',
+    description: 'Ver o termo e lembrar o significado.',
+  },
+  {
+    value: ['reverse'],
+    label: 'Só verso → frente',
+    description: 'Ver o significado e produzir o termo. Mais difícil.',
+  },
+  {
+    value: ['forward', 'reverse'],
+    label: 'Os dois sentidos',
+    description: 'Cada card vira duas revisões, com agendamentos separados.',
+  },
+];
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'DeckForm'>;
 type Route = RouteProp<RootStackParamList, 'DeckForm'>;
@@ -26,6 +50,9 @@ export function DeckFormScreen() {
   const [emoji, setEmoji] = useState(existing?.emoji ?? deckEmojis[0]);
   const [color, setColor] = useState<string>(existing?.color ?? deckColors[0]);
   const [newPerDay, setNewPerDay] = useState(String(existing?.newPerDay ?? 15));
+  const [directions, setDirections] = useState<StudyDirection[]>(
+    existing?.directions?.length ? existing.directions : ['forward']
+  );
   const [saving, setSaving] = useState(false);
 
   const trimmedName = name.trim();
@@ -44,6 +71,7 @@ export function DeckFormScreen() {
         emoji,
         color,
         newPerDay: Number.isFinite(parsed) ? Math.min(200, Math.max(1, parsed)) : 15,
+        directions,
       };
 
       if (existing) {
@@ -136,6 +164,29 @@ export function DeckFormScreen() {
           </View>
         </View>
 
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Sentido do estudo</Text>
+          {DIRECTION_OPTIONS.map((option) => {
+            const active = option.value.join() === directions.join();
+            return (
+              <Pressable
+                key={option.label}
+                onPress={() => setDirections(option.value)}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: active }}
+                style={[styles.directionOption, active && styles.directionActive]}
+              >
+                <View style={styles.directionBody}>
+                  <Text style={[styles.directionLabel, active && styles.directionLabelActive]}>
+                    {option.label}
+                  </Text>
+                  <Text style={styles.directionDescription}>{option.description}</Text>
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+
         <TextField
           label="Cards novos por dia"
           hint="Quantos cards inéditos o app introduz por dia neste baralho. Revisões vencidas não contam."
@@ -181,4 +232,16 @@ const styles = StyleSheet.create({
   colorRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
   colorOption: { width: 38, height: 38, borderRadius: 19, borderWidth: 3, borderColor: 'transparent' },
   colorSelected: { borderColor: colors.text },
+  directionOption: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    padding: spacing.md,
+  },
+  directionActive: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  directionBody: { gap: 2 },
+  directionLabel: { ...typography.body, fontWeight: '600', color: colors.textMuted },
+  directionLabelActive: { color: colors.text },
+  directionDescription: { ...typography.tiny, color: colors.textFaint, lineHeight: 16 },
 });
