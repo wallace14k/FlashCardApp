@@ -19,6 +19,11 @@ estudo de idiomas, e uma mecânica de ofensiva que dá motivo para voltar todo d
   recompensado que dá um protetor de ofensiva, e assinatura premium que remove os anúncios.
 - **Modo Combinar** — duas colunas, frentes de um lado e versos do outro, para ligar os pares.
   Treino de reconhecimento, mais leve que a revisão.
+- **Modo digitação** — escreva a resposta antes de revelar. A conferência ignora acentos,
+  maiúsculas, pontuação e deslizes de digitação.
+- **Estudo nos dois sentidos** — frente → verso, verso → frente, ou ambos, com agendamentos
+  separados por sentido.
+- **Gravação em sequência** — percorre os cards sem áudio de um baralho, um após o outro.
 - **Importação por arquivo** — um `.json` vira um baralho inteiro. A skill `criar-baralho`
   (em `.claude/skills/`) gera esses arquivos a partir de um tema.
 - **Sincronização com o Google Drive** — backup na pasta privada do app, com fusão registro a
@@ -117,6 +122,19 @@ Três diferenças em relação ao Anki, que são o "melhorado" da proposta:
 Durante o treino, um card marcado para voltar em menos de 20 minutos reentra na própria sessão,
 algumas posições à frente — é isso que faz "Não lembro" ter efeito imediato.
 
+## Logo
+
+O ícone é um **F branco dentro de um quadrado azul** de cantos arredondados, gerado por
+`scripts/generate-logo.py`. O F é desenhado com retângulos, não com uma fonte: assim fica idêntico
+em qualquer máquina, tem espessura constante e continua legível a 32 pixels.
+
+```bash
+python3 scripts/generate-logo.py   # requer Pillow
+```
+
+Reescreve tudo em `assets/`. Para mudar cor ou espessura, edite o script e rode de novo — o logo é
+reproduzível, não um binário opaco no repositório.
+
 ## Estrutura
 
 ```
@@ -129,6 +147,7 @@ src/
   notifications/   lembrete diário local
   screens/         telas
   srs/             agendador de repetição espaçada  ← núcleo do app
+  typing/          conferência da resposta digitada
   storage/         persistência local (AsyncStorage)
   store/           estado global, fila de treino e estatísticas
   streak/          mecânica de ofensiva
@@ -151,6 +170,40 @@ eles:
   precisam ser cadastrados na App Store Connect e no Google Play Console.
 - **Sincronização entre aparelhos** — `src/storage/index.ts` é a única porta de entrada dos dados,
   então dá para trocar por SQLite ou por uma API remota sem mexer nas telas.
+
+## Sentidos de estudo
+
+Cada baralho escolhe como é estudado, em *Editar baralho → Sentido do estudo*:
+
+| Sentido | O que treina |
+| --- | --- |
+| Frente → verso | Reconhecer: ver `to put off` e lembrar `adiar`. |
+| Verso → frente | Produzir: ver `adiar` e lembrar `to put off`. Bem mais difícil. |
+| Os dois | Ambos, e **cada sentido tem seu próprio agendamento**. |
+
+Os agendamentos são separados de propósito. Reconhecer e produzir são habilidades diferentes, e
+quase sempre a segunda vai bem atrás da primeira. Um agendamento compartilhado faria o intervalo
+refletir a média das duas, e nenhuma delas voltaria na hora certa.
+
+Na prática, com os dois sentidos ligados, um card conta como duas revisões — as estatísticas do
+baralho já mostram assim. Cards que já existiam entram no sentido novo como se fossem novos, que
+é exatamente o que são nele.
+
+## Modo digitação
+
+Ligue em *Perfil → Durante o treino → Responder digitando*. Em vez de revelar a carta, você
+escreve a resposta e o app compara.
+
+A conferência é frouxa de propósito (`src/typing/check.ts`): ignora maiúsculas, acentos,
+pontuação, espaços repetidos e artigo solto no começo, e tolera erros de digitação proporcionais
+ao tamanho da resposta — nenhum em `casa`, até três numa frase longa. O objetivo do modo é forçar
+a evocação, não medir digitação; reprovar alguém por um acento não mede memória e só faz o usuário
+desligar o recurso.
+
+Respostas com alternativas funcionam: um verso `adiar / postergar` aceita as duas.
+
+O app **sugere** a resposta (destacando um dos três botões) mas não decide por você — só você sabe
+se hesitou antes de escrever.
 
 ## Importar baralhos
 
@@ -203,7 +256,8 @@ São dois conjuntos, com ambientes diferentes:
 
 - **`logica`** — agendador (`src/srs`), ofensiva (`src/streak`), fila de treino
   (`src/store/queue.ts`), leitura de importação (`src/importing`), modo Combinar (`src/matching`),
-  fusão de backup (`src/sync`) e configuração (`src/config.ts`). Roda em Node puro.
+  conferência de digitação (`src/typing`), fusão de backup (`src/sync`) e configuração
+  (`src/config.ts`). Roda em Node puro.
 - **`render`** — monta o app de verdade com `jest-expo`.
 
 O conjunto `render` existe por um motivo concreto: empacotar o bundle **não prova que o app sobe**.

@@ -8,6 +8,7 @@ export type RootStackParamList = {
   Study: { deckId: string };
   Matching: { deckId: string };
   Import: undefined;
+  BatchAudio: { deckId: string };
   SessionSummary: { result: SessionResult };
   Paywall: { source?: 'limite-baralhos' | 'limite-cards' | 'audio' | 'resumo' | 'perfil' };
 };

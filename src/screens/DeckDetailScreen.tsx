@@ -61,6 +61,7 @@ export function DeckDetailScreen() {
   }, [allDeckCards, search]);
 
   const matchingPlayable = allDeckCards.filter((card) => !card.suspended).length >= MIN_CARDS_TO_PLAY;
+  const cardsWithoutAudio = allDeckCards.filter((card) => !card.frontAudio).length;
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -138,14 +139,24 @@ export function DeckDetailScreen() {
               fullWidth
             />
 
-            <Button
-              label="Combinar pares"
-              icon="grid-outline"
-              onPress={() => navigation.navigate('Matching', { deckId: deck.id })}
-              disabled={!matchingPlayable}
-              variant="secondary"
-              fullWidth
-            />
+            <View style={styles.secondaryRow}>
+              <Button
+                label="Combinar"
+                icon="grid-outline"
+                onPress={() => navigation.navigate('Matching', { deckId: deck.id })}
+                disabled={!matchingPlayable}
+                variant="secondary"
+                style={styles.secondaryButton}
+              />
+              <Button
+                label="Gravar áudio"
+                icon="mic-outline"
+                onPress={() => navigation.navigate('BatchAudio', { deckId: deck.id })}
+                disabled={cardsWithoutAudio === 0}
+                variant="secondary"
+                style={styles.secondaryButton}
+              />
+            </View>
 
             {allDeckCards.length > 8 ? (
               <View style={styles.searchBox}>
@@ -311,6 +322,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
   },
   searchInput: { flex: 1, color: colors.text, fontSize: 15, paddingVertical: spacing.md },
+  secondaryRow: { flexDirection: 'row', gap: spacing.sm },
+  secondaryButton: { flex: 1 },
   separator: { height: spacing.sm },
   card: {
     flexDirection: 'row',

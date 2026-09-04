@@ -6,6 +6,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import { useAuth } from '../auth/AuthContext';
+import { BatchAudioScreen } from '../screens/BatchAudioScreen';
 import { CardFormScreen } from '../screens/CardFormScreen';
 import { DeckDetailScreen } from '../screens/DeckDetailScreen';
 import { DeckFormScreen } from '../screens/DeckFormScreen';
@@ -116,6 +117,11 @@ export function RootNavigator() {
             name="Matching"
             component={MatchingScreen}
             options={{ title: 'Combinar' }}
+          />
+          <Stack.Screen
+            name="BatchAudio"
+            component={BatchAudioScreen}
+            options={{ title: 'Gravar em sequência' }}
           />
           <Stack.Screen
             name="Import"

@@ -1,5 +1,15 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
@@ -13,10 +23,12 @@ import { ProgressBar } from '../components/ProgressBar';
 import { Screen } from '../components/Screen';
 import { previewIntervals } from '../srs/scheduler';
 import { useApp } from '../store/AppContext';
+import { facesFor, srsFor } from '../store/queue';
+import { checkAnswer, suggestedGrade, type CheckResult } from '../typing/check';
 import { colors, radius, spacing, typography } from '../theme';
 import { MINUTE_MS } from '../utils/date';
 import type { RootStackParamList } from '../navigation/types';
-import type { Card, Grade } from '../types';
+import type { Grade, StudyDirection } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'Study'>;
 type Route = RouteProp<RootStackParamList, 'Study'>;
@@ -26,6 +38,22 @@ type Route = RouteProp<RootStackParamList, 'Study'>;
  * para daqui a pouco — é o que faz "Não lembro" ter efeito imediato.
  */
 const REQUEUE_WINDOW_MS = 20 * MINUTE_MS;
+
+/**
+ * Chave de uma entrada da fila. Com os dois sentidos ligados, o mesmo card
+ * aparece duas vezes, então o id sozinho não identifica a entrada.
+ */
+type QueueKey = `${string}:${StudyDirection}`;
+
+const keyOf = (cardId: string, direction: StudyDirection): QueueKey => `${cardId}:${direction}`;
+
+function parseKey(key: QueueKey): { cardId: string; direction: StudyDirection } {
+  const separator = key.lastIndexOf(':');
+  return {
+    cardId: key.slice(0, separator),
+    direction: key.slice(separator + 1) as StudyDirection,
+  };
+}
 
 interface Tally {
   total: number;
@@ -44,11 +72,13 @@ export function StudyScreen() {
 
   const deck = decks.find((item) => item.id === params.deckId);
 
-  // A fila é montada uma vez, na abertura do treino, e guarda apenas ids —
-  // assim cada card é sempre lido em seu estado mais recente.
-  const [queue, setQueue] = useState<string[]>(() => getQueue(params.deckId).map((card) => card.id));
+  const [queue, setQueue] = useState<QueueKey[]>(() =>
+    getQueue(params.deckId).map((item) => keyOf(item.card.id, item.direction))
+  );
   const [revealed, setRevealed] = useState(false);
   const [showHint, setShowHint] = useState(false);
+  const [typed, setTyped] = useState('');
+  const [check, setCheck] = useState<CheckResult | null>(null);
   const [tally, setTally] = useState<Tally>(EMPTY_TALLY);
   const [answering, setAnswering] = useState(false);
 
@@ -57,16 +87,18 @@ export function StudyScreen() {
   const initialCount = useRef(queue.length);
   const finished = useRef(false);
 
-  const currentId = queue[0];
-  const current = useMemo(
-    () => cards.find((card) => card.id === currentId),
-    [cards, currentId]
-  );
+  const currentKey = queue[0];
+  const current = useMemo(() => {
+    if (!currentKey) return null;
+    const { cardId, direction } = parseKey(currentKey);
+    const card = cards.find((item) => item.id === cardId);
+    return card ? { card, direction } : null;
+  }, [cards, currentKey]);
 
-  const intervals = useMemo(
-    () => (current ? previewIntervals(current.srs) : null),
-    [current]
-  );
+  const faces = current ? facesFor(current.card, current.direction) : null;
+  const srs = current ? srsFor(current.card, current.direction) : null;
+
+  const intervals = useMemo(() => (srs ? previewIntervals(srs) : null), [srs]);
 
   const buzz = useCallback(
     (style: Haptics.ImpactFeedbackStyle) => {
@@ -84,7 +116,9 @@ export function StudyScreen() {
     cardShownAt.current = Date.now();
     setRevealed(false);
     setShowHint(false);
-  }, [currentId]);
+    setTyped('');
+    setCheck(null);
+  }, [currentKey]);
 
   const complete = useCallback(
     async (result: Tally) => {
@@ -103,20 +137,27 @@ export function StudyScreen() {
     [deck?.name, finishSession, navigation, params.deckId]
   );
 
+  const reveal = useCallback(() => {
+    if (settings.typingEnabled && faces) {
+      setCheck(checkAnswer(typed, faces.answer));
+    }
+    buzz(Haptics.ImpactFeedbackStyle.Light);
+    setRevealed(true);
+  }, [buzz, faces, settings.typingEnabled, typed]);
+
   const handleGrade = useCallback(
     async (grade: Grade) => {
       if (!current || answering) return;
       setAnswering(true);
 
       buzz(
-        grade === 'forgot'
-          ? Haptics.ImpactFeedbackStyle.Heavy
-          : Haptics.ImpactFeedbackStyle.Light
+        grade === 'forgot' ? Haptics.ImpactFeedbackStyle.Heavy : Haptics.ImpactFeedbackStyle.Light
       );
 
       try {
         const elapsed = Date.now() - cardShownAt.current;
-        const outcome = await answer(current.id, grade, elapsed);
+        const wasNew = srs?.state === 'new';
+        const outcome = await answer(current.card.id, current.direction, grade, elapsed);
         if (!outcome) return;
 
         const nextTally: Tally = {
@@ -124,23 +165,22 @@ export function StudyScreen() {
           known: tally.known + (grade === 'known' ? 1 : 0),
           partial: tally.partial + (grade === 'partial' ? 1 : 0),
           forgot: tally.forgot + (grade === 'forgot' ? 1 : 0),
-          newCards: tally.newCards + (current.srs.state === 'new' ? 1 : 0),
+          newCards: tally.newCards + (wasNew ? 1 : 0),
         };
         setTally(nextTally);
 
-        const comesBackSoon = outcome.card.srs.due - Date.now() <= REQUEUE_WINDOW_MS;
+        const updatedSrs = srsFor(outcome.card, current.direction);
+        const comesBackSoon = updatedSrs.due - Date.now() <= REQUEUE_WINDOW_MS;
         const rest = queue.slice(1);
-        const nextQueue = comesBackSoon ? requeue(rest, current.id) : rest;
+        const nextQueue = comesBackSoon ? requeue(rest, currentKey) : rest;
         setQueue(nextQueue);
 
-        if (nextQueue.length === 0) {
-          await complete(nextTally);
-        }
+        if (nextQueue.length === 0) await complete(nextTally);
       } finally {
         setAnswering(false);
       }
     },
-    [answer, answering, buzz, complete, current, queue, tally]
+    [answer, answering, buzz, complete, current, currentKey, queue, srs, tally]
   );
 
   const confirmExit = useCallback(() => {
@@ -164,7 +204,7 @@ export function StudyScreen() {
     });
   }, [navigation, confirmExit]);
 
-  if (!current) {
+  if (!current || !faces || !srs) {
     return (
       <Screen edges={['bottom']}>
         <EmptyState
@@ -180,99 +220,151 @@ export function StudyScreen() {
 
   const done = initialCount.current - queue.length;
   const progress = initialCount.current > 0 ? done / initialCount.current : 0;
+  const suggestion = check ? suggestedGrade(check.verdict) : null;
 
   return (
     <Screen edges={['bottom']}>
-      <View style={styles.progressArea}>
-        <ProgressBar progress={progress} />
-        <View style={styles.progressRow}>
-          <Text style={styles.progressText}>
-            {queue.length} {queue.length === 1 ? 'card restante' : 'cards restantes'}
-          </Text>
-          <View style={styles.tallyRow}>
-            <TallyDot color={colors.forgot} value={tally.forgot} />
-            <TallyDot color={colors.partial} value={tally.partial} />
-            <TallyDot color={colors.known} value={tally.known} />
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={90}
+      >
+        <View style={styles.progressArea}>
+          <ProgressBar progress={progress} />
+          <View style={styles.progressRow}>
+            <Text style={styles.progressText}>
+              {queue.length} {queue.length === 1 ? 'card restante' : 'cards restantes'}
+            </Text>
+            <View style={styles.tallyRow}>
+              <TallyDot color={colors.forgot} value={tally.forgot} />
+              <TallyDot color={colors.partial} value={tally.partial} />
+              <TallyDot color={colors.known} value={tally.known} />
+            </View>
           </View>
         </View>
-      </View>
 
-      <ScrollView contentContainerStyle={styles.cardArea}>
-        <View style={styles.faceCard}>
-          {current.srs.state === 'new' ? (
-            <View style={styles.newBadge}>
-              <Text style={styles.newBadgeText}>NOVO</Text>
+        <ScrollView contentContainerStyle={styles.cardArea} keyboardShouldPersistTaps="handled">
+          <View style={styles.faceCard}>
+            <View style={styles.badges}>
+              {srs.state === 'new' ? (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>NOVO</Text>
+                </View>
+              ) : null}
+              {current.direction === 'reverse' ? (
+                <View style={[styles.badge, styles.badgeReverse]}>
+                  <Ionicons name="swap-horizontal" size={11} color={colors.partial} />
+                  <Text style={[styles.badgeText, styles.badgeTextReverse]}>INVERTIDO</Text>
+                </View>
+              ) : null}
             </View>
-          ) : null}
 
-          <Text style={styles.front}>{current.front}</Text>
+            <Text style={styles.front}>{faces.prompt}</Text>
 
-          {current.frontAudio ? (
-            <AudioButton
-              audio={current.frontAudio}
-              label="Pronúncia"
-              autoPlay={settings.autoPlayFrontAudio}
-            />
-          ) : null}
-
-          {!revealed && current.hint ? (
-            showHint ? (
-              <View style={styles.hintBox}>
-                <Ionicons name="bulb-outline" size={15} color={colors.partial} />
-                <Text style={styles.hintText}>{current.hint}</Text>
-              </View>
-            ) : (
-              <Pressable onPress={() => setShowHint(true)} style={styles.hintToggle}>
-                <Ionicons name="bulb-outline" size={15} color={colors.textMuted} />
-                <Text style={styles.hintToggleText}>Ver dica</Text>
-              </Pressable>
-            )
-          ) : null}
-        </View>
-
-        {revealed ? (
-          <View style={styles.answerCard}>
-            <Text style={styles.answerLabel}>Resposta</Text>
-            <Text style={styles.back}>{current.back}</Text>
-
-            {current.backAudio ? (
+            {faces.promptAudio ? (
               <AudioButton
-                audio={current.backAudio}
-                label="Diálogo"
-                autoPlay={settings.autoPlayBackAudio}
+                audio={faces.promptAudio}
+                label="Áudio"
+                autoPlay={settings.autoPlayFrontAudio}
               />
             ) : null}
 
-            {current.example ? (
-              <View style={styles.exampleBox}>
-                <Text style={styles.exampleText}>{current.example}</Text>
-              </View>
+            {!revealed && current.card.hint ? (
+              showHint ? (
+                <View style={styles.hintBox}>
+                  <Ionicons name="bulb-outline" size={15} color={colors.partial} />
+                  <Text style={styles.hintText}>{current.card.hint}</Text>
+                </View>
+              ) : (
+                <Pressable onPress={() => setShowHint(true)} style={styles.hintToggle}>
+                  <Ionicons name="bulb-outline" size={15} color={colors.textMuted} />
+                  <Text style={styles.hintToggleText}>Ver dica</Text>
+                </Pressable>
+              )
             ) : null}
           </View>
-        ) : null}
-      </ScrollView>
 
-      <View style={styles.footer}>
-        {revealed && intervals ? (
-          <GradeButtons
-            intervals={intervals}
-            onGrade={(grade) => void handleGrade(grade)}
-            showIntervals={settings.showNextInterval}
-            disabled={answering}
-          />
-        ) : (
-          <Button
-            label="Mostrar resposta"
-            onPress={() => {
-              buzz(Haptics.ImpactFeedbackStyle.Light);
-              setRevealed(true);
-            }}
-            size="lg"
-            fullWidth
-          />
-        )}
-      </View>
+          {settings.typingEnabled && !revealed ? (
+            <TextInput
+              value={typed}
+              onChangeText={setTyped}
+              placeholder="Escreva a resposta"
+              placeholderTextColor={colors.textFaint}
+              style={styles.typingInput}
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoFocus
+              onSubmitEditing={reveal}
+              returnKeyType="done"
+              multiline
+            />
+          ) : null}
+
+          {revealed ? (
+            <View style={styles.answerCard}>
+              {check ? <TypingVerdict check={check} typed={typed} /> : null}
+
+              <Text style={styles.answerLabel}>Resposta</Text>
+              <Text style={styles.back}>{faces.answer}</Text>
+
+              {faces.answerAudio ? (
+                <AudioButton
+                  audio={faces.answerAudio}
+                  label="Diálogo"
+                  autoPlay={settings.autoPlayBackAudio}
+                />
+              ) : null}
+
+              {current.card.example ? (
+                <View style={styles.exampleBox}>
+                  <Text style={styles.exampleText}>{current.card.example}</Text>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
+        </ScrollView>
+
+        <View style={styles.footer}>
+          {revealed && intervals ? (
+            <GradeButtons
+              intervals={intervals}
+              onGrade={(grade) => void handleGrade(grade)}
+              showIntervals={settings.showNextInterval}
+              disabled={answering}
+              suggested={suggestion}
+            />
+          ) : (
+            <Button
+              label={settings.typingEnabled ? 'Conferir' : 'Mostrar resposta'}
+              onPress={reveal}
+              size="lg"
+              fullWidth
+            />
+          )}
+        </View>
+      </KeyboardAvoidingView>
     </Screen>
+  );
+}
+
+/** Mostra como a resposta digitada se compara com a esperada. */
+function TypingVerdict({ check, typed }: { check: CheckResult; typed: string }) {
+  const palette = {
+    exact: { color: colors.known, background: colors.knownSoft, icon: 'checkmark-circle' as const, label: 'Certo' },
+    close: { color: colors.partial, background: colors.partialSoft, icon: 'alert-circle' as const, label: 'Quase' },
+    wrong: { color: colors.forgot, background: colors.forgotSoft, icon: 'close-circle' as const, label: 'Diferente' },
+  }[check.verdict];
+
+  return (
+    <View style={[styles.verdict, { backgroundColor: palette.background }]}>
+      <Ionicons name={palette.icon} size={18} color={palette.color} />
+      <View style={styles.verdictBody}>
+        <Text style={[styles.verdictLabel, { color: palette.color }]}>{palette.label}</Text>
+        <Text style={styles.verdictTyped} numberOfLines={2}>
+          {typed.trim() ? `Você escreveu: ${typed.trim()}` : 'Você não escreveu nada'}
+        </Text>
+      </View>
+    </View>
   );
 }
 
@@ -286,15 +378,16 @@ function TallyDot({ color, value }: { color: string; value: number }) {
 }
 
 /**
- * Reinsere um card na fila algumas posições à frente, para que ele volte
- * dentro do treino sem aparecer imediatamente depois de si mesmo.
+ * Reinsere uma entrada na fila algumas posições à frente, para ela voltar
+ * dentro do treino sem aparecer logo depois de si mesma.
  */
-function requeue(rest: string[], cardId: string): string[] {
+function requeue(rest: QueueKey[], key: QueueKey): QueueKey[] {
   const position = Math.min(rest.length, 3);
-  return [...rest.slice(0, position), cardId, ...rest.slice(position)];
+  return [...rest.slice(0, position), key, ...rest.slice(position)];
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   progressArea: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, gap: spacing.sm },
   progressRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   progressText: { ...typography.tiny, color: colors.textFaint },
@@ -312,14 +405,19 @@ const styles = StyleSheet.create({
     padding: spacing.xl,
     gap: spacing.lg,
   },
-  newBadge: {
-    alignSelf: 'flex-start',
+  badges: { flexDirection: 'row', gap: spacing.sm },
+  badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
     backgroundColor: colors.primarySoft,
     borderRadius: radius.sm,
     paddingHorizontal: spacing.sm,
     paddingVertical: 2,
   },
-  newBadgeText: { fontSize: 10, fontWeight: '800', color: colors.primary, letterSpacing: 0.5 },
+  badgeReverse: { backgroundColor: colors.partialSoft },
+  badgeText: { fontSize: 10, fontWeight: '800', color: colors.primary, letterSpacing: 0.5 },
+  badgeTextReverse: { color: colors.partial },
   front: { fontSize: 24, fontWeight: '600', color: colors.text, lineHeight: 32 },
   hintToggle: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, alignSelf: 'flex-start' },
   hintToggleText: { ...typography.caption, color: colors.textMuted },
@@ -332,6 +430,18 @@ const styles = StyleSheet.create({
   },
   hintText: { ...typography.caption, color: colors.text, flex: 1, lineHeight: 19 },
 
+  typingInput: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    color: colors.text,
+    fontSize: 17,
+    minHeight: 56,
+  },
+
   answerCard: {
     backgroundColor: colors.surface,
     borderRadius: radius.xl,
@@ -340,6 +450,10 @@ const styles = StyleSheet.create({
     padding: spacing.xl,
     gap: spacing.md,
   },
+  verdict: { flexDirection: 'row', gap: spacing.md, borderRadius: radius.md, padding: spacing.md },
+  verdictBody: { flex: 1, gap: 2 },
+  verdictLabel: { ...typography.caption, fontWeight: '700' },
+  verdictTyped: { ...typography.tiny, color: colors.textMuted, lineHeight: 16 },
   answerLabel: { ...typography.tiny, color: colors.textFaint, letterSpacing: 0.8 },
   back: { fontSize: 21, fontWeight: '600', color: colors.text, lineHeight: 29 },
   exampleBox: {

@@ -269,6 +269,12 @@ export function ProfileScreen() {
             onChange={(value) => void updateSettings({ autoPlayBackAudio: value })}
           />
           <Toggle
+            label="Responder digitando"
+            description="Escreva a resposta antes de revelar. Fixa mais que só virar a carta, e a conferência ignora acentos e deslizes de digitação."
+            value={settings.typingEnabled}
+            onChange={(value) => void updateSettings({ typingEnabled: value })}
+          />
+          <Toggle
             label="Mostrar quando o card volta"
             description="Exibe o intervalo previsto em cada botão de resposta."
             value={settings.showNextInterval}
